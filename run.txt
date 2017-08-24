@@ -1,0 +1,1 @@
+mongo-connector -m playdb01.prod.hcm.fplay:27017 -t localhost:9200 -d elastic2_doc_manager --namespace fteluv.videos_ver2
