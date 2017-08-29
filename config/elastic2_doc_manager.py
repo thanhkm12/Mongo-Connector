@@ -280,6 +280,7 @@ class DocManager(DocManagerBase):
 
     def search_doc(self, document_id):
         client = MongoClient("playdb01.prod.hcm.fplay", 27017, maxPoolSize=50)
+        #DB Mongo Fteluv, Collection videos_v2
         db = client.fteluv
         collection = db['videos_ver2']
         cursor = collection.find({"_id": ObjectId(document_id)})
