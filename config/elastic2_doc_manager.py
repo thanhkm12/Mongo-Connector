@@ -17,6 +17,10 @@
 Receives documents from an OplogThread and takes the appropriate actions on
 Elasticsearch.
 """
+import pymongo
+from bson import ObjectId
+import json
+from pymongo import MongoClient
 import base64
 import logging
 import threading
@@ -273,6 +277,15 @@ class DocManager(DocManagerBase):
         else:
           return False
     @wrap_exceptions
+
+    def search_doc(self, document_id):
+        client = MongoClient("playdb01.prod.hcm.fplay", 27017, maxPoolSize=50)
+        db = client.fteluv
+        collection = db['videos_ver2']
+        cursor = collection.find({"_id": ObjectId(document_id)})
+        return cursor
+    @wrap_exceptions
+    
     def key_value_update(self, update_spec):
         for key, value in update_spec.iteritems():
            print key
@@ -284,13 +297,23 @@ class DocManager(DocManagerBase):
         """Apply updates given in update_spec to the document whose id
         matches that of doc.
         """
-
+        print "document_id: %s" %document_id
+        print "update_spec: %s" %update_spec
+        doc_id = str(document_id)
+        document_id  = doc_id
+        print "document_id again: %s" %document_id
+        
         index, doc_type = self._index_and_mapping(namespace)
         with self.lock:
             # Check if document source is stored in local buffer
             document = self.BulkBuffer.get_from_sources(index,
                                                         doc_type,
                                                         u(document_id))
+        if self.search_exist(index, document_id)== False:
+            print " Not Found"
+            docs = self.search_doc(document_id)
+            print " docs :%s " % docs
+            self.bulk_upsert_update(docs, namespace, timestamp)
         if document:
             # Document source collected from local buffer
             # Perform apply_update on it and then it will be
@@ -398,6 +421,64 @@ class DocManager(DocManagerBase):
         print "Done Bulk_upsert"
 
     @wrap_exceptions
+
+    def bulk_upsert_update(self, docs, namespace, timestamp):
+        """Insert multiple documents into Elasticsearch."""
+        def docs_to_upsert():
+            doc = None
+            for doc in docs:
+                # Remove metadata and redundant _id
+                index, doc_type = self._index_and_mapping(namespace)
+                doc_id = u(doc.pop("_id"))
+                doc_status = doc["status"]
+                if doc_status == 0:
+                  print "to be continue!!"
+                  continue
+                document_action = {
+                    '_index': index,
+                    '_type': doc_type,
+                    '_id': doc_id,
+                    '_source': self._formatter.format_document(doc)
+                }
+                document_meta = {
+                    '_index': self.meta_index_name,
+                    '_type': self.meta_type,
+                    '_id': doc_id,
+                    '_source': {
+                        'ns': namespace,
+                        '_ts': timestamp
+                    }
+                }
+                yield document_action
+                yield document_meta
+            if doc is None:
+                raise errors.EmptyDocsError(
+                    "Cannot upsert an empty sequence of "
+                    "documents into Elastic Search")
+        try:
+            kw = {}
+            if self.chunk_size > 0:
+                kw['chunk_size'] = self.chunk_size
+
+            responses = streaming_bulk(client=self.elastic,
+                                       actions=docs_to_upsert(),
+                                       **kw)
+
+            for ok, resp in responses:
+                if not ok:
+                    LOG.error(
+                        "Could not bulk-upsert document "
+                        "into ElasticSearch: %r" % resp)
+            if self.auto_commit_interval == 0:
+                self.commit()
+        except errors.EmptyDocsError:
+            # This can happen when mongo-connector starts up, there is no
+            # config file, but nothing to dump
+            pass
+        print "Done Bulk_upsert_update"
+
+    @wrap_exceptions
+
     def insert_file(self, f, namespace, timestamp):
         doc = f.get_metadata()
         doc_id = str(doc.pop('_id'))
@@ -460,6 +541,7 @@ class DocManager(DocManagerBase):
         }
 
         self.index(action, meta_action)
+        print "remove"
 
     @wrap_exceptions
     def _stream_search(self, *args, **kwargs):
