@@ -184,7 +184,7 @@ class DocManager(DocManagerBase):
                 es_connection.RequestsHttpConnection
         if type(url) is not list:
             url = [url]
-        self.elastic = Elasticsearch(hosts=url, **client_options)
+        self.elastic = Elasticsearch(hosts=url, **client_options)   // config timeout
 
         self._formatter = DefaultDocumentFormatter()
         self.BulkBuffer = BulkBuffer(self)
